@@ -1,0 +1,163 @@
+impl @number {
+    get_bit: (self, position: @number) {
+        return self.shift_right(position) % 2
+    },
+    set_bit: (self, position: @number, value: @number) {
+        if value == 0 || value == 1 {
+            let bit = (1.shift_left(position))
+            if value == 0 { bit = -bit }
+
+            return self + bit
+        } else {
+            throw "Not a binary number"
+        }
+    },
+    num_bits: (self) {
+        let bits = 0
+        let num = self
+        if num < 0 { num = -num }
+
+        while num != 0 {
+            bits += 1
+            num = num.shift_right(1)
+        }
+
+        return bits
+    },
+    lsb: (self) {
+        return self.get_bit(0)
+    },
+    msb: (self) {
+        return self.get_bit(self.num_bits() - 1)
+    },
+    shift_left: (self, amount: @number) {
+        return (self * 2^amount).floor()
+    }, 
+    shift_right: (self, amount: @number) {
+        return (self / 2^amount).floor()
+    },
+    not: (self) {
+        return -self - 1
+    },
+    and: (self, value: @number) {
+        let res = 0
+        let a = self
+        let b = value
+        let cur = 0
+        let a_negative = false
+        let b_negative = false
+        num_padding = $.abs(a.num_bits() - b.num_bits())
+
+        if a < 0 { 
+            if a.num_bits() < b.num_bits() {
+                a = a.twos_complement(num_padding)
+            } else { 
+                a = a.twos_complement(0)
+            }
+            a_negative = true
+        }
+        if b < 0 {
+            if b.num_bits() < a.num_bits() {
+                b = b.twos_complement(num_padding)
+            } else { 
+                b = b.twos_complement(0)
+            }
+            b_negative = true
+        }
+
+        while a > 0 && b > 0 {
+            bit_a = a.get_bit(0)
+            bit_b = b.get_bit(0)
+
+            if bit_a == 1 && bit_b == 1 {
+                res = res.set_bit(cur, 1)
+            }
+
+            a = a.shift_right(1)
+            b = b.shift_right(1)
+
+            cur += 1
+        }
+
+        if a_negative && b_negative {
+            return -res
+        } else {
+            return res
+        }
+    },
+    or: (self, value: @number) {
+        return (self + value) - (self.and(value))
+    },
+    xor: (self, value: @number) {
+        let res = 0
+        let mask = 1
+        let a = self
+        let b = value
+        bits = (a.num_bits() + b.num_bits())
+        a_negative = a < 0
+        b_negative = b < 0
+
+        if a_negative { a = 1.shift_left(bits) + a }
+        if b_negative { b = 1.shift_left(bits) + b }
+
+        while a > 0 || b > 0 {
+            bit_a = a.get_bit(0)
+            bit_b = b.get_bit(0)
+
+            if bit_a != bit_b {
+                res = res.or(mask)
+            }
+
+            mask = mask.shift_left(1)
+            a = a.shift_right(1)
+            b = b.shift_right(1)
+        }
+
+        if res >= res.get_bit(bits - 1) == 1 {
+            res -= 1.shift_left(bits)
+        }
+
+        if a_negative != b_negative {
+            res = -(1.shift_left(bits) - res)
+        }
+
+        return res
+    },
+    twos_complement: (self, padding: @number) {
+        let padded = 0
+
+        for i in 0..padding {
+            padded = padded.set_bit(self.num_bits() + i, 1)
+        }
+
+        return (self.not() + padded) + 1
+    },
+    overflowing_add: (self, value: @number) {
+        let new = self + value
+        let overflow = false
+
+        if new > 255 { new %= 255; overflow = true }
+        return [new, overflow]
+    },
+    overflowing_sub: (self, value: @number) {
+        let new = self - value
+        let overflow = false
+
+        if new < 0 { new %= 255; overflow = true }
+        return [new, overflow]
+    },
+    overflowing_mul: (self, value: @number) {
+        let new = self * value
+        let overflow = false
+
+        if new > 255 { new %= 255; overflow = true }
+        return [new, overflow]
+    },
+    overflowing_div: (self, value: @number) {
+        let new = self / value
+        let overflow = false
+
+        if new < 0 { new %= 255; overflow = true }
+        return [new, overflow]
+    }
+}
