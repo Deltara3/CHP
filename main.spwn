@@ -13,7 +13,5 @@ let chip = @chip::new(rom, debug)
 
 while true {
     chip.cycle()
-    if chip.draw == true {
-        chip.do_draw()
-    }
+    if chip.draw == true { chip.do_draw() }
 }
