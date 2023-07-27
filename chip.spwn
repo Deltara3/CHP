@@ -17,6 +17,7 @@ impl @chip {
     rnd: @array,
     draw: @bool,
     debug: @bool,
+    dbg_out: @array,
 
     new: (location: @string, debug: @bool) {
         let ram = [0] * 0x1000
@@ -38,22 +39,30 @@ impl @chip {
             vram: [[0] * 64] * 32,
             rnd: rnd,
             draw: false,
-            debug: debug
+            debug: debug,
+            dbg_out: []
         }
     },
 
     do_draw: (self) {
-        sep = ["-"] * 64
-        $.print(sep.join())
         let line = []
         for y in self.vram {
+            line.push([])
             for x in y {
-                pixel = "▓" if x == 1 else "░"
-                line.push(pixel)
+                pixel = "\u{1b}[2;47m " if x == 1 else "\u{1b}[2;40m "
+                line[-1].push(pixel)
             }
-            $.print(line.join())
-            line = []
+            line[-1] = line[-1].join()
         }
+        
+        // print is slow as fuck on some devices
+        // so less printing = better
+        $.print(
+        "\u{1b}[2J\u{1b}[H\u{1b}[0m"+
+        self.dbg_out.join("\n")+
+        line.join("\n")) // bombie code be like
+        
+        self.dbg_out = []
         self.draw = false
     },
 
@@ -86,7 +95,7 @@ impl @chip {
         y = byte[2]
         
         if byte[0] == 0x0 && byte[1] == 0x0 && byte[2] == 0xE && byte[3] == 0 {
-            if self.debug == true { $.print("CLS") }
+            if self.debug == true { self.dbg_out.push("CLS") }
             for y in 0..32 {
                 for x in 0..64 {
                     self.vram[y][x] = 0
@@ -94,98 +103,98 @@ impl @chip {
             }
             self.pc += 2
         } else if byte[0] == 0x0 && byte[1] == 0x0 && byte[2] == 0xE && byte[3] == 0xE {
-            if self.debug == true { $.print("RET") }
+            if self.debug == true { self.dbg_out.push("RET") }
             self.sp -= 1
             self.pc = self.stack[self.sp]
         } else if byte[0] == 0x1 {
-            if self.debug == true { $.print("JP {}".fmt(nnn)) }
+            if self.debug == true { self.dbg_out.push("JP {}".fmt(nnn)) }
             self.pc = nnn
         } else if byte[0] == 0x2 {
-            if self.debug == true { $.print("CALL {}".fmt(nnn)) }
+            if self.debug == true { self.dbg_out.push("CALL {}".fmt(nnn)) }
             self.stack[self.sp] = self.pc + 2
             self.sp += 1
             self.pc = nnn
         } else if byte[0] == 0x3 {
-            if self.debug == true { $.print("SE V{}, {}".fmt([x, nn])) }
+            if self.debug == true { self.dbg_out.push("SE V{}, {}".fmt([x, nn])) }
             if self.v[x] == nn { self.pc += 2 }
             self.pc += 2
         } else if byte[0] == 0x4 {
-            if self.debug == true { $.print("SNE V{}, {}".fmt([x, nn])) }
+            if self.debug == true { self.dbg_out.push("SNE V{}, {}".fmt([x, nn])) }
             if self.v[x] != nn { self.pc += 2 }
             self.pc += 2
         } else if byte[0] == 0x5 && byte[3] == 0x0 {
-            if self.debug == true { $.print("SE V{}, V{}".fmt([x, y])) }
+            if self.debug == true { self.dbg_out.push("SE V{}, V{}".fmt([x, y])) }
             if self.v[x] == self.v[y] { self.pc += 2 }
             self.pc += 2
         } else if byte[0] == 0x6 {
-            if self.debug == true { $.print("LD V{}, {}".fmt([x, nn])) }
+            if self.debug == true { self.dbg_out.push("LD V{}, {}".fmt([x, nn])) }
             self.v[x] = nn
             self.pc += 2
         } else if byte[0] == 0x7 {
-            if self.debug == true { $.print("ADD V{}, {}".fmt([x, nn])) }
+            if self.debug == true { self.dbg_out.push("ADD V{}, {}".fmt([x, nn])) }
             self.v[x] = self.v[x].overflowing_add(nn)[0]
             self.pc += 2
         } else if byte[0] == 0x8 && byte[3] == 0x0 {
-            if self.debug == true { $.print("LD V{}, V{}".fmt([x, y])) }
+            if self.debug == true { self.dbg_out.push("LD V{}, V{}".fmt([x, y])) }
             self.v[x] = self.v[y]
             self.pc += 2
         } else if byte[0] == 0x8 && byte[3] == 0x1 {
-            if self.debug == true { $.print("OR V{}, V{}".fmt([x, y])) }
+            if self.debug == true { self.dbg_out.push("OR V{}, V{}".fmt([x, y])) }
             self.v[x] = self.v[x].or(self.v[y])
             self.pc += 2
         } else if byte[0] == 0x8 && byte[3] == 0x2 {
-            if self.debug == true { $.print("AND V{}, V{}".fmt([x, y])) }
+            if self.debug == true { self.dbg_out.push("AND V{}, V{}".fmt([x, y])) }
             self.v[x] = self.v[x].and(self.v[y])
             self.pc += 2
         } else if byte[0] == 0x8 && byte[3] == 0x3 {
-            if self.debug == true { $.print("XOR V{}, V{}".fmt([x, y])) }
+            if self.debug == true { self.dbg_out.push("XOR V{}, V{}".fmt([x, y])) }
             self.v[x] = self.v[x].xor(self.v[y])
             self.pc += 2
         } else if byte[0] == 0x8 && byte[3] == 0x4 {
-            if self.debug == true { $.print("ADD V{}, V{}".fmt([x, y])) }
+            if self.debug == true { self.dbg_out.push("ADD V{}, V{}".fmt([x, y])) }
             new = self.v[x].overflowing_add(self.v[y])
             self.v[x] = new[0]
             self.v[0xF] = 1 if new[1] == true else 0
             self.pc += 2
         } else if byte[0] == 0x8 && byte[3] == 0x5 {
-            if self.debug == true { $.print("SUB V{}, V{}".fmt([x, y])) }
+            if self.debug == true { self.dbg_out.push("SUB V{}, V{}".fmt([x, y])) }
             new = self.v[x].overflowing_sub(self.v[y])
             self.v[x] = new[0]
             self.v[0xF] = 0 if new[1] == true else 1
             self.pc += 2
         } else if byte[0] == 0x8 && byte[3] == 0x6 {
-            if self.debug == true { $.print("SHR V{}, V{}".fmt([x, y])) }
+            if self.debug == true { self.dbg_out.push("SHR V{}, V{}".fmt([x, y])) }
             self.v[0xF] = self.v[x].lsb()
             self.v[x] = self.v[x].overflowing_div(2)[0]
             self.pc += 2
         } else if byte[0] == 0x8 && byte[3] == 0x7 {
-            if self.debug == true { $.print("SUBN V{}, V{}".fmt([x, y])) }
+            if self.debug == true { self.dbg_out.push("SUBN V{}, V{}".fmt([x, y])) }
             new = self.v[y].overflowing_sub(self.v[x])
             self.v[0xF] = 0 if new[1] == true else 1
             self.v[x] = new[0]
             self.pc += 2
         } else if byte[0] == 0x8 && byte[3] == 0xE {
-            if self.debug == true { $.print("SHL V{}, V{}".fmt([x, y])) }
+            if self.debug == true { self.dbg_out.push("SHL V{}, V{}".fmt([x, y])) }
             self.v[0xF] = self.v[x].msb()
             self.v[x] = self.v[x].overflowing_mul(2)[0]
             self.pc += 2
         } else if byte[0] == 0x9 && byte[3] == 0x0 {
-            if self.debug == true { $.print("SNE V{}, V{}".fmt([x, y])) }
+            if self.debug == true { self.dbg_out.push("SNE V{}, V{}".fmt([x, y])) }
             if self.v[x] != self.v[y] { self.pc += 2 }
             self.pc += 2
         } else if byte[0] == 0xA {
-            if self.debug == true { $.print("LD I, {}".fmt(nnn)) }
+            if self.debug == true { self.dbg_out.push("LD I, {}".fmt(nnn)) }
             self.i = nnn
             self.pc += 2
         } else if byte[0] == 0xB {
-            if self.debug == true { $.print("JP V0, {}".fmt(nnn)) }
+            if self.debug == true { self.dbg_out.push("JP V0, {}".fmt(nnn)) }
             self.i = nnn + self.v[0]
         } else if byte[0] == 0xC {
-            if self.debug == true { $.print("RND V{}, {}".fmt([x, nn])) }
+            if self.debug == true { self.dbg_out.push("RND V{}, {}".fmt([x, nn])) }
             self.v[x] = $.random(self.rnd).and(nn)
             self.pc += 2
         } else if byte[0] == 0xD {
-            if self.debug == true { $.print("DRW V{}, V{}, {}".fmt([x, y, n])) }
+            if self.debug == true { self.dbg_out.push("DRW V{}, V{}, {}".fmt([x, y, n])) }
             self.v[0xF] = 0
             for byte in 0..n {
                 yu = ((self.v[y] + byte) % 32).floor()
@@ -199,49 +208,49 @@ impl @chip {
             self.draw = true
             self.pc += 2
         } else if byte[0] == 0xE && byte[2] == 0x9 && byte[3] == 0xE {
-            if self.debug == true { $.print("SKP V{}".fmt(x)) }
+            if self.debug == true { self.dbg_out.push("SKP V{}".fmt(x)) }
             self.pc += 2
         } else if byte[0] == 0xE && byte[2] == 0xA && byte[3] == 0x1 {
-            if self.debug == true { $.print("SKNP V{}".fmt(x)) }
+            if self.debug == true { self.dbg_out.push("SKNP V{}".fmt(x)) }
             self.pc += 2
         } else if byte[0] == 0xF && byte[2] == 0x0 && byte[3] == 0x7 {
-            if self.debug == true { $.print("LD V{}, DT".fmt(x)) }
+            if self.debug == true { self.dbg_out.push("LD V{}, DT".fmt(x)) }
             self.v[x] = self.dt
             self.pc += 2
         } else if byte[0] == 0xF && byte[2] == 0x0 && byte[3] == 0xA {
-            if self.debug == true { $.print("LD V{}, K".fmt(x)) }
+            if self.debug == true { self.dbg_out.push("LD V{}, K".fmt(x)) }
             self.v[x] = 0x0
             self.pc += 2
         } else if byte[0] == 0xF && byte[2] == 0x1 && byte[3] == 0x5 {
-            if self.debug == true { $.print("LD DT, V{}".fmt(x)) }
+            if self.debug == true { self.dbg_out.push("LD DT, V{}".fmt(x)) }
             self.dt = self.v[x]
             self.pc += 2
         } else if byte[0] == 0xF && byte[2] == 0x1 && byte[3] == 0x8 {
-            if self.debug == true { $.print("LD ST, V{}".fmt(x)) }
+            if self.debug == true { self.dbg_out.push("LD ST, V{}".fmt(x)) }
             self.st = self.v[x]
             self.pc += 2
         } else if byte[0] == 0xF && byte[2] == 0x1 && byte[3] == 0xE {
-            if self.debug == true { $.print("ADD I, V{}".fmt(x)) }
+            if self.debug == true { self.dbg_out.push("ADD I, V{}".fmt(x)) }
             self.i += self.v[x]
             self.pc += 2
         } else if byte[0] == 0xF && byte[2] == 0x2 && byte[3] == 0x9 {
-            if self.debug == true { $.print("LD F, V{}".fmt(x)) }
+            if self.debug == true { self.dbg_out.push("LD F, V{}".fmt(x)) }
             self.i = self.v[x] * 5
             self.pc += 2
         } else if byte[0] == 0xF && byte[2] == 0x3 && byte[3] == 0x3 {
-            if self.debug == true { $.print("LD B, V{}".fmt(x)) }
+            if self.debug == true { self.dbg_out.push("LD B, V{}".fmt(x)) }
             self.ram[self.i] = self.v[x] / 100
             self.ram[self.i + 1] = (self.v[x] % 100) / 10
             self.ram[self.i + 2] = self.v[x] % 10
             self.pc += 2
         } else if byte[0] == 0xF && byte[2] == 0x5 && byte[3] == 0x5 {
-            if self.debug == true { $.print("LD [I], V{}".fmt(x)) }
+            if self.debug == true { self.dbg_out.push("LD [I], V{}".fmt(x)) }
             for i in 0..x + 1 {
                 self.ram[self.i + i] = self.v[i]
             }
             self.pc += 2
         } else if byte[0] == 0xF && byte[2] == 0x6 && byte[3] == 0x5 {
-            if self.debug == true { $.print("LD V{}, [I]".fmt(x)) }
+            if self.debug == true { self.dbg_out.push("LD V{}, [I]".fmt(x)) }
             for i in 0..x + 1 {
                 self.v[i] = self.ram[self.i + i]
             }
