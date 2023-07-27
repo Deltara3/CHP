@@ -5,11 +5,8 @@ $.print("Path to ROM (You may need a full path)")
 rom = $.get_input("> ") 
 
 buf = $.get_input("Show operations? (y/N) ")
-let debug = false
 
-if buf == "y" || buf == "yes" { debug = true }
-
-let chip = @chip::new(rom, debug)
+let chip = @chip::new(rom, buf == "y" || buf == "yes")
 
 while true {
     chip.cycle()
