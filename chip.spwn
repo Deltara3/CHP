@@ -13,10 +13,18 @@ impl @quirk {
     jumping: @bool
 }
 
-default_quirks = @quirk::{
+c8 = @quirk::{
     vf_reset: true,
     memory: true,
     clipping: true,
+    shifting: false,
+    jumping: false
+}
+
+none = @quirk::{
+    vf_reset: false,
+    memory: false,
+    clipping: false,
     shifting: false,
     jumping: false
 }
@@ -35,8 +43,9 @@ impl @chip {
     debug: @bool,
     update: @bool,
     quirk: @quirk,
+    instrs: @array,
 
-    new: (debug: @bool = false) -> @chip {
+    new: (quirk: @quirk = c8, debug: @bool = false) -> @chip {
         mut ram = font
         for i in 0..432 { ram.push(0) }
         for byte in rom { ram.push(byte) }
@@ -68,11 +77,12 @@ impl @chip {
             st: 0,
             debug: debug,
             update: false,
-            quirk: default_quirks
+            quirk: quirk,
+            instrs: []
         }
     },
 
-    rw: (self, address: @int) -> @int {
+    rw: (&self, address: @int) -> @int {
         return (self.ram[address] << 8) | self.ram[address + 1]
     },
 
@@ -82,8 +92,6 @@ impl @chip {
     },
 
     draw: (&mut self) {
-        $.print("\u{1b}[2J")
-
         mut canvas = ""
 
         for y in self.vram {
@@ -117,7 +125,7 @@ impl @chip {
             opcode & 0x000f
         ]
 
-        instr += f"({hex(byte[0])}{hex(byte[1])}{hex(byte[2])}{hex(byte[3])}) "
+        // instr += f"({hex(byte[0])}{hex(byte[1])}{hex(byte[2])}{hex(byte[3])}) "
 
         n = byte[3]
         nn = opcode & 0x00ff
@@ -315,12 +323,16 @@ impl @chip {
 
         self.pc += 2
 
-        if self.debug { $.print(instr) }
+        if self.debug {
+            if self.instrs.length == 5 { self.instrs.remove(0) }
+            self.instrs.push(instr)
+        }
 
         return fail
     },
 }
 
 return {
-    default_quirks: default_quirks
+    c8: c8,
+    none: none
 }

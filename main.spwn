@@ -1,9 +1,12 @@
 extract import "./chip.spwn"
+import core
 
 cpf = 8
 
-mut chip = @chip::new()
+mut chip = @chip::new(none, true)
 mut failure = false
+
+$.print("\u{1b}[2J \u{1b}[H")
 
 while failure == false {
     for _ in 0..cpf {
