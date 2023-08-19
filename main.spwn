@@ -1,14 +1,14 @@
-import "chip.spwn"
-import "ext.spwn"
+extract import "./chip.spwn"
 
-$.print("Path to ROM (You may need a full path)")
-rom = $.get_input("> ") 
+cpf = 8
 
-buf = $.get_input("Show operations? (y/N) ")
+mut chip = @chip::new()
+mut failure = false
 
-let chip = @chip::new(rom, buf == "y" || buf == "yes")
-
-while true {
-    chip.cycle()
-    if chip.draw == true { chip.do_draw() }
+while failure == false {
+    for _ in 0..cpf {
+        state = chip.cycle()
+    }
+    chip.dec_timers()
+    if chip.update { chip.draw() }
 }
