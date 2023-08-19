@@ -84,7 +84,7 @@ impl @chip {
     draw: (&mut self) {
         $.print("\u{1b}[2J")
 
-        mut canvas = []
+        mut canvas = ""
 
         for y in self.vram {
             mut row = ""
@@ -93,12 +93,10 @@ impl @chip {
                 row += "\u{1b}[2;47m  " if x == 1 else "\u{1b}[2;40m  "
             }
 
-            row += "\u{1b}[0m"
-
-            $.print(row)
+            canvas += row + "\u{1b}[0m\n"
         }
 
-        $.print("\u{1b}[H")
+        $.print(canvas + "\u{1b}[H")
 
         self.update = false
     },
