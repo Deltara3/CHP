@@ -3,7 +3,7 @@ extract import "chip.spwn"
 extract import "selection.spwn"
 
 /* Short for Cycles per Frame */
-cpf = 1
+cpf = 8
 
 /*
     This takes an optional parameter of @config
