@@ -16,13 +16,14 @@ mut failure = false
 /* Clear screen and set cursor to home (0, 0), and then hide the cursor */
 $.print("\u{1b}[2J\u{1b}[H\u{1b}[?25l")
 
-while failure == false {
+while !failure {
     /* Execute the amount of instructions specified by CPF for this frame */
     for _ in 0..cpf {
-        state = chip.cycle()
+        failure = chip.cycle()
 
         /* If debug is set draw instructions */
         if chip.config.debug { chip.draw_op() }
+        if failure { break }
     }
 
     /* Decrement the sound and delay timer */

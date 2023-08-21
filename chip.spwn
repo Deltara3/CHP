@@ -396,7 +396,7 @@ impl @chip {
                 if self.config.quirk.memory { self.i += 1 }
             },
             _ => {
-                instr += "\u{1b}[31m" + f"UNKN"
+                instr += "\u{1b}[90mUNKN"
                 fail = true
             }
         }
