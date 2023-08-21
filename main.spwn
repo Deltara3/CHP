@@ -1,17 +1,33 @@
-extract import "./chip.spwn"
 import core
+extract import "chip.spwn"
+extract import "selection.spwn"
 
-cpf = 8
+/* Short for Cycles per Frame */
+cpf = 1
 
-mut chip = @chip::new(none, true)
+/*
+    This takes an optional parameter of @config
+    Create one using @config::new() and modify as necessary
+*/
+
+mut chip = @chip::new(rom.data)
 mut failure = false
 
-$.print("\u{1b}[2J \u{1b}[H")
+/* Clear screen and set cursor to home (0, 0), and then hide the cursor */
+$.print("\u{1b}[2J\u{1b}[H\u{1b}[?25l")
 
 while failure == false {
+    /* Execute the amount of instructions specified by CPF for this frame */
     for _ in 0..cpf {
         state = chip.cycle()
+
+        /* If debug is set draw instructions */
+        if chip.config.debug { chip.draw_op() }
     }
+
+    /* Decrement the sound and delay timer */
     chip.dec_timers()
+
+    /* Draw the screen */
     if chip.update { chip.draw() }
 }

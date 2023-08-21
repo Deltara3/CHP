@@ -1,0 +1,44 @@
+/*
+    Quirk List
+    quirk: explanation
+
+    VF Reset: 8xy1, 8xy2, and 8xy3 reset the flag register to 0
+    Memory: Fx55 and Fx65 increment I
+    Clipping: Pixels drawn off screen don't wrap and are dropped
+    Shifting: 8xy6 and 8xye only operator on VX
+    Jumping: bnnn uses VX instead of V0
+*/
+type @quirk
+impl @quirk {
+    vf_reset: @bool,
+    memory: @bool,
+    clipping: @bool,
+    shifting: @bool,
+    jumping: @bool,
+
+    new: () -> @quirk {
+        return @quirk::{
+            vf_reset: true,
+            memory: true,
+            clipping: true,
+            shifting: false,
+            jumping: false
+        }
+    },
+
+    none: (&self) {
+        self.vf_reset = false
+        self.memory = false
+        self.clipping = false
+        self.shifting = false
+        self.jumping = false
+    },
+
+    all: (&self) {
+        self.vf_reset = true
+        self.memory = true
+        self.clipping = true
+        self.shifting = true
+        self.jumping = true
+    }
+}

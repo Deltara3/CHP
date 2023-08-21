@@ -1,4 +1,5 @@
 rom/
-rom.spwn
-.spwnc/
 libraries
+.spwnc/
+built/
+selection.spwn

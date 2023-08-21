@@ -1,0 +1,29 @@
+quirk = import "quirk.spwn"
+
+/*
+    Option List
+    option: explanation
+
+    Quirk: Stores the quirks to be used
+    Debug: Sets if opcodes should be printed at the side
+    Address: Prints the address of an opcode if debug is set
+    Raw: Prints the raw version of the opcode if debug is set
+    Arrow: Prints an arrow before the last executed opcode if debug is set
+*/
+type @config
+impl @config {
+    quirk: quirk.@quirk,
+    debug: @bool,
+    address: @bool,
+    raw: @bool,
+
+    new: () -> @config {
+        return @config::{
+            quirk: quirk.@quirk::new(),
+            debug: true,
+            address: true,
+            raw: true,
+            arrow: true
+        }
+    }
+}

@@ -1,32 +1,19 @@
-import "./ext.spwn"
-extract import "./font.spwn"
-extract import "./rom.spwn"
-extract import "./util.spwn"
 import core
+import "ext.spwn"
+extract import "font.spwn"
+extract import "util.spwn"
+extract import "config.spwn"
 
-type @quirk
-impl @quirk {
-    vf_reset: @bool,
-    memory: @bool,
-    clipping: @bool,
-    shifting: @bool,
-    jumping: @bool
-}
-
-c8 = @quirk::{
-    vf_reset: true,
-    memory: true,
-    clipping: true,
-    shifting: false,
-    jumping: false
-}
-
-none = @quirk::{
-    vf_reset: false,
-    memory: false,
-    clipping: false,
-    shifting: false,
-    jumping: false
+/* Colors used */
+colors = {
+    instr: "\u{1b}[93m",
+    label: "\u{1b}[94m",
+    regtr: "\u{1b}[95m",
+    value: "\u{1b}[31m",
+    opcde: "\u{1b}[92m",
+    fore: "\u{1b}[2;47m",
+    back: "\u{1b}[2;40m",
+    reset: "\u{1b}[0m"
 }
 
 type @chip
@@ -40,30 +27,30 @@ impl @chip {
     sp: @int,
     dt: @int,
     st: @int,
-    debug: @bool,
     update: @bool,
-    quirk: @quirk,
     instrs: @array,
+    config: @config,
+    cur_cycle: @int,
 
-    new: (quirk: @quirk = c8, debug: @bool = false) -> @chip {
+    new: (rom: @array, configuration: @config = @config::new()) -> @chip {
+        /* Setup RAM with the font and rom data */
         mut ram = font
         for i in 0..432 { ram.push(0) }
         for byte in rom { ram.push(byte) }
         for i in ram.length..4096 { ram.push(0) }
 
+        /* Initialize VRAM */
         mut vram = []
-
         for y in 0..32 {
             mut row = []
             for x in 0..64 { row.push(0) }
             vram.push(row)
         }
 
+        /* Initalize the stack and V registers */
         mut v = []
         mut stk = []
         for i in 0..16 { v.push(0); stk.push(0) }
-
-        ram[0x1ff] = 1
 
         return @chip::{
             ram: ram,
@@ -75,10 +62,10 @@ impl @chip {
             sp: 0,
             dt: 0,
             st: 0,
-            debug: debug,
             update: false,
-            quirk: quirk,
-            instrs: []
+            instrs: [],
+            config: configuration,
+            cur_cycle: 0
         }
     },
 
@@ -86,38 +73,71 @@ impl @chip {
         return (self.ram[address] << 8) | self.ram[address + 1]
     },
 
-    dec_timers: (&mut self) {
+    dec_timers: (&self) {
         if self.dt > 0 { self.dt -= 1 }
         if self.st > 0 { self.st -= 1 }
     },
 
-    draw: (&mut self) {
+    draw: (&self) {
         mut canvas = ""
 
         for y in self.vram {
             mut row = ""
 
             for x in y {
-                row += "\u{1b}[2;47m  " if x == 1 else "\u{1b}[2;40m  "
+                /* Sets the color for the current pixel using cell background */
+                row += f"{colors.fore}  " if x == 1 else f"{colors.back}  "
             }
 
+            /* Add the built row to the canvas and reset the color on each line */
             canvas += row + "\u{1b}[0m\n"
         }
 
-        $.print(canvas + "\u{1b}[H")
+        /* Set the cursor to home (0, 0), then print the canvas */
+        $.print("\u{1b}[H" + canvas)
 
         self.update = false
     },
 
-    cycle: (&mut self) -> @bool {
+    draw_op: (&self) {
+        mut canvas = "\u{1b}[1;130f\u{1b}[0KInstruction Trace"
+
+        for i in 0..self.instrs.length {
+            /* Prefix to set cursor position and clear line */
+            canvas += "\u{1b}[" + f"{i + 2};130f" + "\u{1b}[0K"
+
+            /* Draw arrow next to previously executed opcode if set */
+            if i == self.instrs.length - 1 && self.config.arrow {
+                canvas += "-> "
+            }
+
+            /* If this is not the last replace with spaces */
+            if i != self.instrs.length - 1 && self.config.arrow {
+                canvas += "   "
+            }
+
+            /* Append instruction data */
+            canvas += self.instrs[i]
+        }
+
+        canvas += "\u{1b}[32;130f\u{1b}[0K" + f"Cycle: {self.cur_cycle}"
+
+        $.print("\u{1b}[H" + canvas)
+    },
+
+    cycle: (&self) -> @bool {
+        self.cur_cycle += 1
+
+        /* Read opcode and return the success state */
         opcode = self.rw(self.pc)
         return self.execute(opcode)
     },
 
-    execute: (&mut self, opcode: @int) -> @bool {
+    execute: (&self, opcode: @int) -> @bool {
         mut fail = false
-        mut instr = f"[0x{hex(self.pc)}] "
+        mut instr = ""
 
+        /* Split opcode into nibbles */
         byte = [
             (opcode & 0xf000) >> 12,
             (opcode & 0x0f00) >> 8,
@@ -125,214 +145,276 @@ impl @chip {
             opcode & 0x000f
         ]
 
-        // instr += f"({hex(byte[0])}{hex(byte[1])}{hex(byte[2])}{hex(byte[3])}) "
+        /* Add debug data based on settings */
+        if self.config.address {
+            instr += f"[{colors.label}0x{hex(self.pc)}{colors.reset}] "
+        }
 
+        if self.config.raw {
+            instr += f"({colors.opcde}{hex(byte[0])}{hex(byte[1])}{hex(byte[2])}{hex(byte[3])}{colors.reset}) "
+        }
+
+        /*
+            Aliases for certain parts of the opcode
+            alias: bits; location
+
+            n: 4-bits; lowest 4 bits
+            nn: 8-bits; lowest 8 bits
+            nnn; 12-bits; lowest 12 bits
+            x: 4-bits; lower 4 bits of the high byte
+            y: 4-bits; lower 4 bits of the low byte
+        */
         n = byte[3]
         nn = opcode & 0x00ff
         nnn = opcode & 0x0fff
         x = byte[1]
         y = byte[2]
 
-        if byte[0] == 0x0 && byte[1] == 0x0 && byte[2] == 0xe && byte[3] == 0x0 {
-            instr += f"CLS"
+        /* Execution loop, only standard CHIP-8 opcodes are implemented */
+        match byte {
+            ==[0x0, 0x0, 0xe, 0x0] => {
+                instr += f"{colors.instr}CLS"
 
-            for y in 0..32 {
-                for x in 0..64 {
-                    self.vram[y][x] = 0
+                for y in 0..32 {
+                    for x in 0..64 {
+                        self.vram[y][x] = 0
+                    }
                 }
-            }
-        } else if byte[0] == 0x0 && byte[1] == 0x0 && byte[2] == 0xe && byte[3] == 0xe {
-            instr += "RET"
-            self.pc = self.stk[self.sp]
-            self.stk[self.sp] = 0
-            self.sp -= 1
-        } else if byte[0] == 0x1 {
-            instr += f"JP 0x{hex(nnn)}"
-            self.pc = nnn - 2
-        } else if byte[0] == 0x2 {
-            instr += f"CALL 0x{hex(nnn)}"
-            self.sp += 1
-            self.stk[self.sp] = self.pc
-            self.pc = nnn - 2
-        } else if byte[0] == 0x3 {
-            instr += f"SE V{hex(x)}, 0x{hex(nn)}"
-            if self.v[x] == nn { self.pc += 2 }
-        } else if byte[0] == 0x4 {
-            instr += f"SNE V{hex(x)}, 0x{hex(nn)}"
-            if self.v[x] != nn { self.pc += 2 }
-        } else if byte[0] == 0x5 {
-            instr += f"SE V{hex(x)}, V{hex(y)}"
-            if self.v[x] == self.v[y] { self.pc += 2 }
-        } else if byte[0] == 0x6 {
-            instr += f"LD V{hex(x)}, 0x{hex(nn)}"
-            self.v[x] = nn
-        } else if byte[0] == 0x7 {
-            instr += f"ADD V{hex(x)}, 0x{hex(nn)}"
-            self.v[x] += nn
-        } else if byte[0] == 0x8 && byte[3] == 0x0 {
-            instr += f"LD V{hex(x)}, V{hex(y)}"
-            self.v[x] = self.v[y]
-        } else if byte[0] == 0x8 && byte[3] == 0x1 {
-            instr += f"OR V{hex(x)}, V{hex(y)}"
-            if self.quirk.vf_reset { self.v[0xf] = 0 }
-            self.v[x] |= self.v[y]
-        } else if byte[0] == 0x8 && byte[3] == 0x2 {
-            instr += f"AND V{hex(x)}, V{hex(y)}"
-            if self.quirk.vf_reset { self.v[0xf] = 0 }
-            self.v[x] &= self.v[y]
-        } else if byte[0] == 0x8 && byte[3] == 0x3 {
-            instr += f"XOR V{hex(x)}, V{hex(y)}"
-            if self.quirk.vf_reset { self.v[0xf] = 0 }
-            self.v[x] = self.v[x] ^ self.v[y]
-        } else if byte[0] == 0x8 && byte[3] == 0x4 {
-            instr += f"ADD V{hex(x)}, V{hex(y)}"
-            res = self.v[x] + self.v[y]
-            self.v[x] = res
-            self.v[0xf] = (res > 255) as @int
-        } else if byte[0] == 0x8 && byte[3] == 0x5 {
-            instr += f"SUB V{hex(x)}, V{hex(y)}"
-            overflow = (self.v[x] > self.v[y]) as @int
-            self.v[x] = (self.v[x] - self.v[y])
-            self.v[0xf] = overflow
-        } else if byte[0] == 0x8 && byte[3] == 0x6 {
-            instr += f"SHR V{hex(x)}, V{hex(y)}"
-            lsb = self.v[x] & 1
-            if self.quirk.shifting {
-                self.v[x] = self.v[x] >> 1
-            } else {
-                self.v[x] = self.v[y] >> 1
-            }
-            self.v[0xf] = lsb
-        } else if byte[0] == 0x8 && byte[3] == 0x7 {
-            instr += f"SUBN V{hex(x)}, V{hex(y)}"
-            overflow = (self.v[y] > self.v[x]) as @int
-            self.v[x] = (self.v[y] - self.v[x])
-            self.v[0xf] = overflow
-        } else if byte[0] == 0x8 && byte[3] == 0xe {
-            instr += f"SHL V{hex(x)}, V{hex(y)}"
-            lsb = (self.v[x] >> 7) & 1
-
-            if self.quirk.shifting {
-                self.v[x] = self.v[x] << 1
-            } else {
-                self.v[x] = self.v[y] << 1
-            }
-
-            self.v[0xf] = lsb
-        } else if byte[0] == 0x9 && byte[3] == 0x0 {
-            instr += f"SNE V{hex(x)}, V{hex(y)}"
-            if self.v[x] != self.v[y] { self.pc += 2 }
-        } else if byte[0] == 0xa {
-            instr += f"LD I, 0x{hex(nnn)}"
-            self.i = nnn
-        } else if byte[0] == 0xb {
-            instr += f"JP V0, 0x{hex(nnn)}"
-            if self.quirk.jumping {
-                self.pc = nnn + self.v[x] - 2
-            } else {
-                self.pc = nnn + self.v[0] - 2
-            }
-        } else if byte[0] == 0xc {
-            instr += f"RND V{hex(x)}, 0x{hex(nn)}"
-        } else if byte[0] == 0xd {
-            instr += f"DRW V{hex(x)}, V{hex(y)}, 0x{hex(n)}"
-
-            self.v[0xf] = 0
-
-            for byte in 0..n {
-                mut yu = 0
-                if self.quirk.clipping {
-                    yu = (self.v[y] % 32) + byte
+            },
+            ==[0x0, 0x0, 0xe, 0xe] => {
+                instr += f"{colors.instr}RET"
+                self.pc = self.stk[self.sp]
+                self.stk[self.sp] = 0
+                self.sp -= 1
+            },
+            [==0x1, _, _, _] => {
+                instr += f"{colors.instr}JP {colors.label}0x{hex(nnn)}"
+                self.pc = nnn - 2
+            },
+            [==0x2, _, _, _] => {
+                instr += f"{colors.instr}CALL {colors.label}0x{hex(nnn)}"
+                self.sp += 1
+                self.stk[self.sp] = self.pc
+                self.pc = nnn - 2
+            },
+            [==0x3, _, _, _] => {
+                instr += f"{colors.instr}SE {colors.regtr}V{hex(x)}{colors.reset}, {colors.value}0x{hex(nn)}"
+                if self.v[x] == nn { self.pc += 2 }
+            },
+            [==0x4, _, _, _] => {
+                instr += f"{colors.instr}SNE {colors.regtr}V{hex(x)}{colors.reset}, {colors.value}0x{hex(nn)}"
+                if self.v[x] != nn { self.pc += 2 }
+            },
+            [==0x5, _, _, _] => {
+                instr += f"{colors.instr}SE {colors.regtr}V{hex(x)}{colors.reset}, {colors.regtr}V{hex(y)}"
+                if self.v[x] == self.v[y] { self.pc += 2 }
+            },
+            [==0x6, _, _, _] => {
+                instr += f"{colors.instr}LD {colors.regtr}V{hex(x)}{colors.reset}, {colors.value}0x{hex(nn)}"
+                self.v[x] = nn
+            },
+            [==0x7, _, _, _] => {
+                instr += f"{colors.instr}ADD {colors.regtr}V{hex(x)}{colors.reset}, {colors.value}0x{hex(nn)}"
+                self.v[x] += nn
+            },
+            [==0x8, _, _, ==0x0] => {
+                instr += f"{colors.instr}LD {colors.regtr}V{hex(x)}{colors.reset}, {colors.regtr}V{hex(y)}"
+                self.v[x] = self.v[y]
+            },
+            [==0x8, _, _, ==0x1] => {
+                instr += f"{colors.instr}OR {colors.regtr}V{hex(x)}{colors.reset}, {colors.regtr}V{hex(y)}"
+                if self.config.quirk.vf_reset { self.v[0xf] = 0 }
+                self.v[x] |= self.v[y]
+            },
+            [==0x8, _, _, ==0x2] => {
+                instr += f"{colors.instr}AND {colors.regtr}V{hex(x)}{colors.reset}, {colors.regtr}V{hex(y)}"
+                if self.config.quirk.vf_reset { self.v[0xf] = 0 }
+                self.v[x] &= self.v[y]
+            },
+            [==0x8, _, _, ==0x3] => {
+                instr += f"{colors.instr}XOR {colors.regtr}V{hex(x)}{colors.reset}, {colors.regtr}V{hex(y)}"
+                if self.config.quirk.vf_reset { self.v[0xf] = 0 }
+                self.v[x] = self.v[x] ^ self.v[y]
+            },
+            [==0x8, _, _, ==0x4] => {
+                instr += f"{colors.instr}ADD {colors.regtr}V{hex(x)}{colors.reset}, {colors.regtr}V{hex(y)}"
+                res = self.v[x] + self.v[y]
+                self.v[x] = res
+                self.v[0xf] = (res > 255) as @int
+            },
+            [==0x8, _, _, ==0x5] => {
+                instr += f"{colors.instr}SUB {colors.regtr}V{hex(x)}{colors.reset}, {colors.regtr}V{hex(y)}"
+                overflow = (self.v[x] > self.v[y]) as @int
+                self.v[x] = (self.v[x] - self.v[y])
+                self.v[0xf] = overflow
+            },
+            [==0x8, _, _, ==0x6] => {
+                instr += f"{colors.instr}SHR {colors.regtr}V{hex(x)}{colors.reset}, {colors.regtr}V{hex(y)}"
+                lsb = self.v[x] & 1
+                if self.config.quirk.shifting {
+                    self.v[x] = self.v[x] >> 1
                 } else {
-                    yu = (self.v[y] + byte) % 32
+                    self.v[x] = self.v[y] >> 1
+                }
+                self.v[0xf] = lsb
+            },
+            [==0x8, _, _, ==0x7] => {
+                instr += f"{colors.instr}SUBN {colors.regtr}V{hex(x)}{colors.reset}, {colors.regtr}V{hex(y)}"
+                overflow = (self.v[y] > self.v[x]) as @int
+                self.v[x] = (self.v[y] - self.v[x])
+                self.v[0xf] = overflow
+            },
+            [==0x8, _, _, ==0xe] => {
+                instr += f"{colors.instr}SHL {colors.regtr}V{hex(x)}{colors.reset}, {colors.regtr}V{hex(y)}"
+                lsb = (self.v[x] >> 7) & 1
+
+                if self.config.quirk.shifting {
+                    self.v[x] = self.v[x] << 1
+                } else {
+                    self.v[x] = self.v[y] << 1
                 }
 
-                if yu > 31 {
-                    continue
-                } else {
-                    for bit in 0..8 {
-                        mut xu = 0
-                        if self.quirk.clipping {
-                            xu = (self.v[x] % 64) + bit
-                        } else {
-                            xu = (self.v[x] + bit) % 64
-                        }
+                self.v[0xf] = lsb
+            },
+            [==0x9, _, _, ==0x0] => {
+                instr += f"{colors.instr}SNE {colors.regtr}V{hex(x)}{colors.reset}, {colors.regtr}V{hex(y)}"
+                if self.v[x] != self.v[y] { self.pc += 2 }
+            },
+            [==0xa, _, _, _] => {
+                instr += f"{colors.instr}LD {colors.regtr}I{colors.reset}, {colors.label}0x{hex(nnn)}"
+                self.i = nnn
+            },
+            [==0xb, _, _, _] => {
+                mut index = ""
 
-                        if xu > 63 {
-                            continue
-                        } else {
-                            color = (self.ram[self.i + byte] >> (7 - bit)) & 1
-                            self.v[0xf] |= color & self.vram[yu][xu]
-                            self.vram[yu][xu] = self.vram[yu][xu] ^ color
+                if self.config.quirk.jumping {
+                    index = f"{hex(x)}"
+                } else {
+                    index = "0"
+                }
+
+                instr += f"{colors.instr}JP {colors.regtr}V{index}{colors.reset}, {colors.value}0x{hex(nnn)}"
+                if self.config.quirk.jumping {
+                    self.pc = nnn + self.v[x] - 2
+                } else {
+                    self.pc = nnn + self.v[0] - 2
+                }
+            },
+            [==0xc, _, _, _] => {
+                instr += f"{colors.instr}RND {colors.regtr}V{hex(x)}{colors.reset}, {colors.value}0x{hex(nn)}"
+            },
+            [==0xd, _, _, _] => {
+                instr += f"{colors.instr}DRW {colors.regtr}V{hex(x)}{colors.reset}, {colors.regtr}V{hex(y)}{colors.reset}, {colors.value}0x{hex(n)}"
+
+                self.v[0xf] = 0
+
+                for byte in 0..n {
+                    mut yu = 0
+                    if self.config.quirk.clipping {
+                        yu = (self.v[y] % 32) + byte
+                    } else {
+                        yu = (self.v[y] + byte) % 32
+                    }
+
+                    if yu > 31 {
+                        continue
+                    } else {
+                        for bit in 0..8 {
+                            mut xu = 0
+                            if self.config.quirk.clipping {
+                                xu = (self.v[x] % 64) + bit
+                            } else {
+                                xu = (self.v[x] + bit) % 64
+                            }
+
+                            if xu > 63 {
+                                continue
+                            } else {
+                                color = (self.ram[self.i + byte] >> (7 - bit)) & 1
+                                self.v[0xf] |= color & self.vram[yu][xu]
+                                self.vram[yu][xu] = self.vram[yu][xu] ^ color
+                            }
                         }
                     }
                 }
+
+                self.update = true
+            },
+            [==0xe, _, ==0x9, ==0xe] => {
+                instr += f"{colors.instr}SKP {colors.regtr}V{hex(x)}"
+                self.pc += 2
+            },
+            [==0xe, _, ==0xa, ==0x1] => {
+                instr += f"{colors.instr}SKNP {colors.regtr}V{hex(x)}"
+                self.pc += 2
+            },
+            [==0xf, _, ==0x0, ==0x7] => {
+                instr += f"{colors.instr}LD {colors.regtr}V{hex(x)}{colors.reset}, {colors.regtr}DT"
+                self.v[x] = self.dt
+            },
+            [==0xf, _, ==0x0, ==0xa] => {
+                instr += f"{colors.instr}LD {colors.regtr}V{hex(x)}{colors.reset}, K"
+            },
+            [==0xf, _, ==0x1, ==0x5] => {
+                instr += f"{colors.instr}LD {colors.regtr}DT{colors.reset}, {colors.regtr}V{hex(x)}"
+                self.dt = self.v[x]
+            },
+            [==0xf, _, ==0x1, ==0x8] => {
+                instr += f"{colors.instr}LD {colors.regtr}DT{colors.reset}, {colors.regtr}V{hex(x)}"
+                self.st = self.v[x]
+            },
+            [==0xf, _, ==0x1, ==0xe] => {
+                instr += f"{colors.instr}ADD {colors.regtr}I{colors.reset}, {colors.regtr}V{hex(x)}"
+                self.i += self.v[x]
+            },
+            [==0xf, _, ==0x2, ==0x9] => {
+                instr += f"{colors.instr}LD {colors.regtr}F{colors.reset}, {colors.regtr}V{hex(x)}"
+                self.i = self.v[x] * 5
+            },
+            [==0xf, _, ==0x3, ==0x3] => {
+                instr += f"{colors.instr}LD {colors.regtr}B{colors.reset}, {colors.regtr}V{hex(x)}"
+                self.ram[self.i] = self.v[x] / 100
+                self.ram[self.i + 1] = (self.v[x] % 100) / 10
+                self.ram[self.i + 2] = self.v[x] % 10
+            },
+            [==0xf, _, ==0x5, ==0x5] => {
+                instr += f"{colors.instr}LD {colors.reset}[{colors.regtr}I{colors.reset}], {colors.regtr}V{hex(x)}"
+
+                for i in 0..x + 1 {
+                    self.ram[self.i + i] = self.v[i]
+                }
+
+                if self.config.quirk.memory { self.i += 1 }
+            },
+            [==0xf, _, ==0x6, ==0x5] => {
+                instr += f"{colors.instr}LD {colors.regtr}V{hex(x)}{colors.reset}, [{colors.regtr}I{colors.reset}]"
+
+                for i in 0..x + 1 {
+                    self.v[i] = self.ram[self.i + i]
+                }
+
+                if self.config.quirk.memory { self.i += 1 }
+            },
+            _ => {
+                instr += "\u{1b}[31m" + f"UNKN"
+                fail = true
             }
-
-            self.update = true
-        } else if byte[0] == 0xe && byte[2] == 0x9 && byte[3] == 0xe {
-            instr += f"SKP V{hex(x)}"
-            self.pc += 2
-        } else if byte[0] == 0xe && byte[2] == 0xa && byte[3] == 0x1 {
-            instr += f"SKNP V{hex(x)}"
-            self.pc += 2
-        } else if byte[0] == 0xf && byte[2] == 0x0 && byte[3] == 0x7 {
-            instr += f"LD V{hex(x)}, DT"
-            self.v[x] = self.dt
-        } else if byte[0] == 0xf && byte[2] == 0x0 && byte[3] == 0xa {
-            instr += f"LD V{hex(x)}, K"
-        } else if byte[0] == 0xf && byte[2] == 0x1 && byte[3] == 0x5 {
-            instr += f"LD DT, V{hex(x)}"
-            self.dt = self.v[x]
-        } else if byte[0] == 0xf && byte[2] == 0x1 && byte[3] == 0x8 {
-            instr += f"LD DT, V{hex(x)}"
-            self.st = self.v[x]
-        } else if byte[0] == 0xf && byte[2] == 0x1 && byte[3] == 0xe {
-            instr += f"ADD I, V{hex(x)}"
-            self.i += self.v[x]
-        } else if byte[0] == 0xf && byte[2] == 0x2 && byte[3] == 0x9 {
-            instr += f"LD F, V{hex(x)}"
-            self.i = self.v[x] * 5
-        } else if byte[0] == 0xf && byte[2] == 0x3 && byte[3] == 0x3 {
-            instr += f"LD B, V{hex(x)}"
-            self.ram[self.i] = self.v[x] / 100
-            self.ram[self.i + 1] = (self.v[x] % 100) / 10
-            self.ram[self.i + 2] = self.v[x] % 10
-        } else if byte[0] == 0xf && byte[2] == 0x5 && byte[3] == 0x5 {
-            instr += f"LD [I], V{hex(x)}"
-
-            for i in 0..x + 1 {
-                self.ram[self.i + i] = self.v[i]
-            }
-
-            if self.quirk.memory { self.i += 1 }
-        } else if byte[0] == 0xf && byte[2] == 0x6 && byte[3] == 0x5 {
-            instr += f"LD V{hex(x)}, [I]"
-
-            for i in 0..x + 1 {
-                self.v[i] = self.ram[self.i + i]
-            }
-
-            if self.quirk.memory { self.i += 1 }
-        } else {
-            fail = true
-            instr += f"UNKN"
         }
 
+        instr += colors.reset
+
+        /* Correct any overflows in the V registers that may occur */
         for i in 0..self.v.length { self.v[i] = self.v[i].ecu_mod(256) }
 
+        /* Increment the program counter to read the next instruction */
         self.pc += 2
 
-        if self.debug {
-            if self.instrs.length == 5 { self.instrs.remove(0) }
+        /* Add to instruction array if debug is enabled */
+        if self.config.debug {
+            if self.instrs.length == 30 { self.instrs.remove(0) }
             self.instrs.push(instr)
         }
 
         return fail
     },
-}
-
-return {
-    c8: c8,
-    none: none
 }
