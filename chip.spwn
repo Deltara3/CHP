@@ -234,7 +234,7 @@ impl @chip {
             [==0x8, _, _, ==0x3] => {
                 instr += f"{colors.instr}XOR {colors.regtr}V{hex(x)}{colors.reset}, {colors.regtr}V{hex(y)}"
                 if self.config.quirk.vf_reset { self.v[0xf] = 0 }
-                self.v[x] = self.v[x] ^ self.v[y]
+                self.v[x] ^= self.v[y]
             },
             [==0x8, _, _, ==0x4] => {
                 instr += f"{colors.instr}ADD {colors.regtr}V{hex(x)}{colors.reset}, {colors.regtr}V{hex(y)}"
@@ -332,7 +332,7 @@ impl @chip {
                             } else {
                                 color = (self.ram[self.i + byte] >> (7 - bit)) & 1
                                 self.v[0xf] |= color & self.vram[yu][xu]
-                                self.vram[yu][xu] = self.vram[yu][xu] ^ color
+                                self.vram[yu][xu] ^= color
                             }
                         }
                     }
