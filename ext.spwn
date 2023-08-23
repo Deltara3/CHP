@@ -1,7 +1,3 @@
-overload ^ {
-    (a: @int, b: @int) => (a | b) & (!a | !b)
-}
-
 impl @int {
     ecu_mod: (self, b: @int) -> @int {
         return (self % b + b) % b
